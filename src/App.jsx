@@ -140,6 +140,16 @@ export default function App() {
     await supabase.from("briefs").delete().eq("id", id);
     setBriefs(prev => prev.filter(b => b.id !== id));
   };
+  const updateBrief = async (data) => {
+    const dbRow = {
+      title: data.title, product: data.product, main_body: data.mainBody,
+      cta: data.cta, key_visuals: data.keyVisuals, video_style: data.videoStyle,
+      inspiration_url: data.inspirationUrl, inspiration_note: data.inspirationNote,
+      hooks: data.hooks, active: data.active,
+    };
+    await supabase.from("briefs").update(dbRow).eq("id", data.id);
+    setBriefs(prev => prev.map(b => b.id === data.id ? { ...b, ...data } : b));
+  };
 
   // ── Video ops ──
   const addVideos = async (newVideos) => {
@@ -244,7 +254,7 @@ export default function App() {
 
       <div style={{ maxWidth:1100, margin:"0 auto", padding:"28px 24px" }}>
         {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefs={briefs} totalDue={totalDue} postedToday={postedToday} inProgress={inProgress} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
-        {view==="briefs"    && <Briefs briefs={briefs} addBrief={addBrief} deleteBrief={deleteBrief} creators={creators} videos={videos} addVideos={addVideos} showToast={showToast} activeBrief={activeBrief} setActiveBrief={setActiveBrief}/>}
+        {view==="briefs"    && <Briefs briefs={briefs} addBrief={addBrief} deleteBrief={deleteBrief} updateBrief={updateBrief} creators={creators} videos={videos} addVideos={addVideos} showToast={showToast} activeBrief={activeBrief} setActiveBrief={setActiveBrief}/>}
         {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} deleteVideo={deleteVideo} creators={creators} briefs={briefs} showToast={showToast} setReviewing={setReviewing}/>}
         {view==="creators"  && <Creators creators={creators} addCreator={addCreator} updateCreator={updateCreator} videos={videos} showToast={showToast}/>}
         {view==="strategy"  && <Strategy creators={creators} videos={videos} briefs={briefs} tips={tips} addTip={addTip} deleteTip={deleteTip} showToast={showToast}/>}
@@ -356,9 +366,11 @@ function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress
 }
 
 // ── Briefs ────────────────────────────────────────────────────────────────────
-function Briefs({ briefs, addBrief, deleteBrief, creators, videos, addVideos, showToast, activeBrief, setActiveBrief }) {
+function Briefs({ briefs, addBrief, deleteBrief, updateBrief, creators, videos, addVideos, showToast, activeBrief, setActiveBrief }) {
   const [showForm,    setShowForm]    = useState(false);
   const [assignModal, setAssignModal] = useState(null);
+  const [editingBrief, setEditingBrief] = useState(null);
+  const [editForm,    setEditForm]    = useState(null);
   const [form, setForm] = useState({ title:"", product:"", mainBody:"", cta:"", keyVisuals:"", videoStyle:"Talking head", inspirationUrl:"", inspirationNote:"", hooks:["","","","",""], active:true });
 
   const createBrief = async () => {
@@ -368,6 +380,31 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, videos, addVideos, sh
     setShowForm(false);
     setForm({ title:"", product:"", mainBody:"", cta:"", keyVisuals:"", videoStyle:"Talking head", inspirationUrl:"", inspirationNote:"", hooks:["","","","",""], active:true });
     showToast("Brief created ✓");
+  };
+
+  const startEdit = (b, e) => {
+    e.stopPropagation();
+    // Pad hooks array to 5 for the edit form
+    const paddedHooks = [...(b.hooks||[])];
+    while (paddedHooks.length < 5) paddedHooks.push("");
+    setEditForm({ ...b, hooks: paddedHooks });
+    setEditingBrief(b.id);
+  };
+
+  const saveEdit = async (e) => {
+    e.stopPropagation();
+    if (!editForm.title) return;
+    const updated = { ...editForm, hooks: editForm.hooks.filter(Boolean) };
+    await updateBrief(updated);
+    setEditingBrief(null);
+    setEditForm(null);
+    showToast("Brief updated ✓");
+  };
+
+  const cancelEdit = (e) => {
+    e.stopPropagation();
+    setEditingBrief(null);
+    setEditForm(null);
   };
 
   const assignBrief = async (brief, creatorId, date) => {
@@ -411,7 +448,7 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, videos, addVideos, sh
           </div>
           <div style={{ marginBottom:16 }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
-              <div className="field-label" style={{ marginBottom:0 }}>Hooks (5 variations)</div>
+              <div className="field-label" style={{ marginBottom:0 }}>Hooks (up to 5)</div>
               <button className="btn-ghost" style={{ fontSize:10, padding:"3px 8px" }} onClick={() => setForm(f => ({...f,hooks:HOOK_TEMPLATES.slice(0,5)}))}>Auto-fill</button>
             </div>
             {form.hooks.map((h,i) => (
@@ -431,42 +468,80 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, videos, addVideos, sh
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {briefs.length===0 && <div style={{ color:"#444", fontSize:14, textAlign:"center", padding:"40px 0" }}>No briefs yet.</div>}
         {briefs.map(b => (
-          <div key={b.id} className="card" style={{ cursor:"pointer", borderColor:activeBrief?.id===b.id?"#E8C54755":"#1E1E1E" }} onClick={() => setActiveBrief(activeBrief?.id===b.id?null:b)}>
-            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
-                  <span style={{ fontWeight:500, fontSize:14, color:"#E8E8E0" }}>{b.title}</span>
-                  {b.product && <span className="tag">{b.product}</span>}
-                  {b.videoStyle && <span className="tag" style={{ color:"#7EC8E3", borderColor:"#7EC8E333" }}>{b.videoStyle}</span>}
-                  {(() => {
-                    const briefVids = videos.filter(v => v.briefId === b.id);
-                    if (briefVids.length === 0) return <span className="tag" style={{ color:"#666" }}>not started</span>;
-                    const allPosted = briefVids.every(v => v.status === "posted");
-                    if (allPosted) return <span className="tag" style={{ color:"#A8E6CF", borderColor:"#A8E6CF33" }}>complete</span>;
-                    return <span className="tag" style={{ color:"#E8C547", borderColor:"#E8C54733" }}>in progress</span>;
-                  })()}
+          <div key={b.id} className="card" style={{ cursor:"pointer", borderColor: editingBrief===b.id ? "#E8C54788" : activeBrief?.id===b.id?"#E8C54755":"#1E1E1E" }} onClick={() => editingBrief!==b.id && setActiveBrief(activeBrief?.id===b.id?null:b)}>
+
+            {/* Edit form — inline */}
+            {editingBrief===b.id && editForm ? (
+              <div onClick={e => e.stopPropagation()}>
+                <div style={{ fontSize:12, color:"#E8C547", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:14 }}>Editing brief</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+                  <div><div className="field-label">Brief title</div><input value={editForm.title} onChange={e => setEditForm(f => ({...f,title:e.target.value}))}/></div>
+                  <div><div className="field-label">Product / category</div><input value={editForm.product||""} onChange={e => setEditForm(f => ({...f,product:e.target.value}))}/></div>
                 </div>
-                <div style={{ fontSize:12, color:"#555" }}>{b.hooks?.length||0} hooks · {new Date(b.createdAt).toLocaleDateString()}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+                  <div><div className="field-label">Video delivery</div><select value={editForm.videoStyle||"Talking head"} onChange={e => setEditForm(f => ({...f,videoStyle:e.target.value}))}>{VIDEO_STYLES.map(s => <option key={s}>{s}</option>)}</select></div>
+                  <div><div className="field-label">Inspiration link</div><input value={editForm.inspirationUrl||""} onChange={e => setEditForm(f => ({...f,inspirationUrl:e.target.value}))}/></div>
+                </div>
+                {editForm.inspirationUrl && <div style={{ marginBottom:12 }}><div className="field-label">What to take from this</div><input value={editForm.inspirationNote||""} onChange={e => setEditForm(f => ({...f,inspirationNote:e.target.value}))}/></div>}
+                <div style={{ marginBottom:12 }}><div className="field-label">Main body script</div><textarea rows={4} value={editForm.mainBody||""} onChange={e => setEditForm(f => ({...f,mainBody:e.target.value}))} style={{resize:"vertical"}}/></div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+                  <div><div className="field-label">CTA</div><input value={editForm.cta||""} onChange={e => setEditForm(f => ({...f,cta:e.target.value}))}/></div>
+                  <div><div className="field-label">Key visuals / b-roll</div><input value={editForm.keyVisuals||""} onChange={e => setEditForm(f => ({...f,keyVisuals:e.target.value}))}/></div>
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <div className="field-label" style={{ marginBottom:8 }}>Hooks (up to 5)</div>
+                  {editForm.hooks.map((h,i) => (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                      <div style={{ fontSize:11, color:"#555", minWidth:20 }}>H{i+1}</div>
+                      <input placeholder={`Hook ${i+1}…`} value={h} onChange={e => { const hooks=[...editForm.hooks]; hooks[i]=e.target.value; setEditForm(f => ({...f,hooks})); }}/>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button className="btn-primary" style={{ fontSize:12 }} onClick={saveEdit}>Save changes</button>
+                  <button className="btn-ghost" style={{ fontSize:12 }} onClick={cancelEdit}>Cancel</button>
+                </div>
               </div>
-              <div style={{ display:"flex", gap:6 }}>
-                <button className="btn-ghost" style={{ fontSize:11 }} onClick={e => { e.stopPropagation(); setAssignModal(b); }}>Assign →</button>
-                <button className="btn-ghost" style={{ fontSize:11, color:"#555" }} onClick={e => { e.stopPropagation(); deleteBrief(b.id); }}>Delete</button>
-              </div>
-            </div>
-            {activeBrief?.id===b.id && (
-              <div style={{ marginTop:16, paddingTop:16, borderTop:"1px solid #1A1A1A" }}>
-                {b.inspirationUrl && <div style={{ marginBottom:14, padding:"10px 12px", background:"#0D0D0D", borderRadius:8, border:"1px solid #1A1A1A" }}><div className="field-label">Inspiration</div><a href={b.inspirationUrl} target="_blank" rel="noreferrer" style={{ fontSize:12, color:"#7EC8E3", textDecoration:"none" }}>{b.inspirationUrl}</a>{b.inspirationNote && <div style={{ fontSize:12, color:"#888", marginTop:4 }}>{b.inspirationNote}</div>}</div>}
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
-                  <div><div style={{ fontSize:11, color:"#555", marginBottom:6, letterSpacing:"0.06em", textTransform:"uppercase" }}>Main body</div><div style={{ fontSize:13, color:"#999", lineHeight:1.6, whiteSpace:"pre-wrap" }}>{b.mainBody||"—"}</div></div>
-                  <div>
-                    <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Video delivery</div><div style={{ fontSize:13, color:"#7EC8E3", marginBottom:10 }}>{b.videoStyle||"—"}</div>
-                    <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>CTA</div><div style={{ fontSize:13, color:"#999", marginBottom:10 }}>{b.cta||"—"}</div>
-                    <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Key visuals</div><div style={{ fontSize:13, color:"#999" }}>{b.keyVisuals||"—"}</div>
+            ) : (
+              <>
+                <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
+                      <span style={{ fontWeight:500, fontSize:14, color:"#E8E8E0" }}>{b.title}</span>
+                      {b.product && <span className="tag">{b.product}</span>}
+                      {b.videoStyle && <span className="tag" style={{ color:"#7EC8E3", borderColor:"#7EC8E333" }}>{b.videoStyle}</span>}
+                      {(() => {
+                        const briefVids = videos.filter(v => v.briefId === b.id);
+                        if (briefVids.length === 0) return <span className="tag" style={{ color:"#666" }}>not started</span>;
+                        const allPosted = briefVids.every(v => v.status === "posted");
+                        if (allPosted) return <span className="tag" style={{ color:"#A8E6CF", borderColor:"#A8E6CF33" }}>complete</span>;
+                        return <span className="tag" style={{ color:"#E8C547", borderColor:"#E8C54733" }}>in progress</span>;
+                      })()}
+                    </div>
+                    <div style={{ fontSize:12, color:"#555" }}>{b.hooks?.length||0} hooks · {new Date(b.createdAt).toLocaleDateString()}</div>
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button className="btn-ghost" style={{ fontSize:11 }} onClick={e => startEdit(b, e)}>Edit</button>
+                    <button className="btn-ghost" style={{ fontSize:11 }} onClick={e => { e.stopPropagation(); setAssignModal(b); }}>Assign →</button>
+                    <button className="btn-ghost" style={{ fontSize:11, color:"#555" }} onClick={e => { e.stopPropagation(); deleteBrief(b.id); }}>Delete</button>
                   </div>
                 </div>
-                <div style={{ fontSize:11, color:"#555", marginBottom:8, letterSpacing:"0.06em", textTransform:"uppercase" }}>Hooks</div>
-                {(b.hooks||[]).map((h,i) => <div key={i} style={{ display:"flex", gap:10, marginBottom:6 }}><span style={{ fontSize:11, color:"#E8C547", minWidth:20 }}>H{i+1}</span><span style={{ fontSize:13, color:"#ccc", lineHeight:1.5 }}>{h}</span></div>)}
-              </div>
+                {activeBrief?.id===b.id && (
+                  <div style={{ marginTop:16, paddingTop:16, borderTop:"1px solid #1A1A1A" }}>
+                    {b.inspirationUrl && <div style={{ marginBottom:14, padding:"10px 12px", background:"#0D0D0D", borderRadius:8, border:"1px solid #1A1A1A" }}><div className="field-label">Inspiration</div><a href={b.inspirationUrl} target="_blank" rel="noreferrer" style={{ fontSize:12, color:"#7EC8E3", textDecoration:"none" }}>{b.inspirationUrl}</a>{b.inspirationNote && <div style={{ fontSize:12, color:"#888", marginTop:4 }}>{b.inspirationNote}</div>}</div>}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
+                      <div><div style={{ fontSize:11, color:"#555", marginBottom:6, letterSpacing:"0.06em", textTransform:"uppercase" }}>Main body</div><div style={{ fontSize:13, color:"#999", lineHeight:1.6, whiteSpace:"pre-wrap" }}>{b.mainBody||"—"}</div></div>
+                      <div>
+                        <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Video delivery</div><div style={{ fontSize:13, color:"#7EC8E3", marginBottom:10 }}>{b.videoStyle||"—"}</div>
+                        <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>CTA</div><div style={{ fontSize:13, color:"#999", marginBottom:10 }}>{b.cta||"—"}</div>
+                        <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Key visuals</div><div style={{ fontSize:13, color:"#999" }}>{b.keyVisuals||"—"}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:11, color:"#555", marginBottom:8, letterSpacing:"0.06em", textTransform:"uppercase" }}>Hooks</div>
+                    {(b.hooks||[]).map((h,i) => <div key={i} style={{ display:"flex", gap:10, marginBottom:6 }}><span style={{ fontSize:11, color:"#E8C547", minWidth:20 }}>H{i+1}</span><span style={{ fontSize:13, color:"#ccc", lineHeight:1.5 }}>{h}</span></div>)}
+                  </div>
+                )}
+              </>
             )}
           </div>
         ))}

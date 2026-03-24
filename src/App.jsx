@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const VIDEO_STYLES = ["Talking head","GRWM","Transition","Voice-over + b-roll","POV","Haul / unboxing","Day-in-the-life"];
+const VIDEO_STYLES = ["Talking head","GRWM","Transition","Voice-over + b-roll","POV","Haul / unboxing","Day-in-the-life","Viral style"];
 const HOOK_TEMPLATES = [
   "POV: you discovered Tilt and now you can't stop…",
   "I found the most [CATEGORY] pieces on Tilt",
@@ -13,8 +13,8 @@ const HOOK_TEMPLATES = [
 ];
 const PLATFORMS  = ["TikTok","Instagram","YouTube","LinkedIn"];
 const CATEGORIES = ["Y2K","Vintage","Streetwear","Luxury","—"];
-const STATUSES   = ["not started","filming","editing","review","approved","posted"];
-const STATUS_COLORS = { "not started":"#666", filming:"#E8C547", editing:"#F4A261", review:"#7EC8E3", approved:"#A8E6CF", posted:"#A8E6CF" };
+const STATUSES   = ["assigned","editing","first draft","second draft","approved","posted"];
+const STATUS_COLORS = { "assigned":"#666", "editing":"#F4A261", "first draft":"#E8C547", "second draft":"#7EC8E3", "approved":"#A8E6CF", "posted":"#A8E6CF" };
 
 const REVIEW_CHECKS = [
   { id:"hook_lands",     label:"Hook lands in first 3 seconds",         category:"Hook"       },
@@ -58,7 +58,7 @@ const mapBrief = r => r ? ({
 const mapVideo = r => r ? ({
   id: r.id, briefId: r.brief_id, creatorId: r.creator_id,
   title: r.title||"", hook: r.hook||"", mainBody: r.main_body||"",
-  videoStyle: r.video_style||"", status: r.status||"not started",
+  videoStyle: r.video_style||"", status: r.status||"assigned",
   date: r.date||"", platform: r.platform||"TikTok",
   notes: r.notes||"", videoUrl: r.video_url||"",
   reviewChecks: r.review_checks||{}, reviewNote: r.review_note||"",
@@ -181,11 +181,16 @@ export default function App() {
     setTips(prev => prev.filter(t => t.id !== id));
   };
 
+  const deleteVideo = async (id) => {
+    await supabase.from("videos").delete().eq("id", id);
+    setVideos(prev => prev.filter(v => v.id !== id));
+  };
+
   const todayStr    = new Date().toISOString().split("T")[0];
   const todayVideos = videos.filter(v => v.date === todayStr);
   const postedToday = todayVideos.filter(v => v.status === "posted").length;
   const totalDue    = creators.filter(c => c.status === "active").length * 5;
-  const inProgress  = todayVideos.filter(v => !["not started","posted"].includes(v.status)).length;
+  const inProgress  = todayVideos.filter(v => !["assigned","posted"].includes(v.status)).length;
 
   if (!loaded) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", fontFamily:"'DM Mono',monospace", color:"#E8C547", fontSize:12, letterSpacing:"0.1em", background:"#0A0A0A" }}>
@@ -239,8 +244,8 @@ export default function App() {
 
       <div style={{ maxWidth:1100, margin:"0 auto", padding:"28px 24px" }}>
         {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefs={briefs} totalDue={totalDue} postedToday={postedToday} inProgress={inProgress} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
-        {view==="briefs"    && <Briefs briefs={briefs} addBrief={addBrief} deleteBrief={deleteBrief} creators={creators} addVideos={addVideos} showToast={showToast} activeBrief={activeBrief} setActiveBrief={setActiveBrief}/>}
-        {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} creators={creators} briefs={briefs} showToast={showToast} setReviewing={setReviewing}/>}
+        {view==="briefs"    && <Briefs briefs={briefs} addBrief={addBrief} deleteBrief={deleteBrief} creators={creators} videos={videos} addVideos={addVideos} showToast={showToast} activeBrief={activeBrief} setActiveBrief={setActiveBrief}/>}
+        {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} deleteVideo={deleteVideo} creators={creators} briefs={briefs} showToast={showToast} setReviewing={setReviewing}/>}
         {view==="creators"  && <Creators creators={creators} addCreator={addCreator} updateCreator={updateCreator} videos={videos} showToast={showToast}/>}
         {view==="strategy"  && <Strategy creators={creators} videos={videos} briefs={briefs} tips={tips} addTip={addTip} deleteTip={deleteTip} showToast={showToast}/>}
       </div>
@@ -254,7 +259,7 @@ export default function App() {
 function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress, todayVideos, setView, setReviewing }) {
   const activeBriefs  = briefs.filter(b => b.active);
   const completion    = totalDue > 0 ? Math.round((postedToday/totalDue)*100) : 0;
-  const pendingReview = todayVideos.filter(v => v.status === "review");
+  const pendingReview = todayVideos.filter(v => v.status === "first draft" || v.status === "second draft");
 
   return (
     <div className="fade">
@@ -351,7 +356,7 @@ function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress
 }
 
 // ── Briefs ────────────────────────────────────────────────────────────────────
-function Briefs({ briefs, addBrief, deleteBrief, creators, addVideos, showToast, activeBrief, setActiveBrief }) {
+function Briefs({ briefs, addBrief, deleteBrief, creators, videos, addVideos, showToast, activeBrief, setActiveBrief }) {
   const [showForm,    setShowForm]    = useState(false);
   const [assignModal, setAssignModal] = useState(null);
   const [form, setForm] = useState({ title:"", product:"", mainBody:"", cta:"", keyVisuals:"", videoStyle:"Talking head", inspirationUrl:"", inspirationNote:"", hooks:["","","","",""], active:true });
@@ -367,17 +372,17 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, addVideos, showToast,
 
   const assignBrief = async (brief, creatorId, date) => {
     const creator = creators.find(c => c.id===creatorId);
-    const newVideos = brief.hooks.slice(0,5).map((hook,i) => ({
+    const filledHooks = brief.hooks.filter(h => h && h.trim() !== "");
+    const newVideos = filledHooks.map((hook,i) => ({
       id: `${Date.now()}-${i}`, briefId: brief.id, creatorId,
-      title: `${brief.title} — ${creator?.name}`, hook: hook||`Hook ${i+1}`,
+      title: `${brief.title} — ${creator?.name}`, hook: hook,
       mainBody: brief.mainBody, videoStyle: brief.videoStyle,
-      status: "not started", date: date||new Date().toISOString().split("T")[0],
+      status: "assigned", date: date||new Date().toISOString().split("T")[0],
       platform: creator?.platform||"TikTok", notes:"", videoUrl:"", reviewChecks:{}, reviewNote:"",
     }));
-    while (newVideos.length < 5) newVideos.push({ ...newVideos[0], id:`${Date.now()}-x${newVideos.length}`, hook:`Variation ${newVideos.length+1}` });
-    await addVideos(newVideos.slice(0,5));
+    await addVideos(newVideos);
     setAssignModal(null);
-    showToast(`Assigned 5 videos to ${creator?.name} ✓`);
+    showToast(`Assigned ${newVideos.length} video${newVideos.length!==1?"s":""} to ${creator?.name} ✓`);
   };
 
   return (
@@ -395,7 +400,7 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, addVideos, showToast,
             <div><div className="field-label">Product / category</div><input placeholder="e.g. Y2K finds on Tilt" value={form.product} onChange={e => setForm(f => ({...f,product:e.target.value}))}/></div>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
-            <div><div className="field-label">Video style</div><select value={form.videoStyle} onChange={e => setForm(f => ({...f,videoStyle:e.target.value}))}>{VIDEO_STYLES.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div className="field-label">Video delivery</div><select value={form.videoStyle} onChange={e => setForm(f => ({...f,videoStyle:e.target.value}))}>{VIDEO_STYLES.map(s => <option key={s}>{s}</option>)}</select></div>
             <div><div className="field-label">Inspiration link</div><input placeholder="https://tiktok.com/@… or instagram.com/p/…" value={form.inspirationUrl} onChange={e => setForm(f => ({...f,inspirationUrl:e.target.value}))}/></div>
           </div>
           {form.inspirationUrl && <div style={{ marginBottom:12 }}><div className="field-label">What to take from this</div><input placeholder="e.g. Match this energy, replicate hook style…" value={form.inspirationNote} onChange={e => setForm(f => ({...f,inspirationNote:e.target.value}))}/></div>}
@@ -433,7 +438,13 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, addVideos, showToast,
                   <span style={{ fontWeight:500, fontSize:14, color:"#E8E8E0" }}>{b.title}</span>
                   {b.product && <span className="tag">{b.product}</span>}
                   {b.videoStyle && <span className="tag" style={{ color:"#7EC8E3", borderColor:"#7EC8E333" }}>{b.videoStyle}</span>}
-                  <span className="tag" style={{ color:b.active?"#A8E6CF":"#666" }}>{b.active?"active":"inactive"}</span>
+                  {(() => {
+                    const briefVids = videos.filter(v => v.briefId === b.id);
+                    if (briefVids.length === 0) return <span className="tag" style={{ color:"#666" }}>not started</span>;
+                    const allPosted = briefVids.every(v => v.status === "posted");
+                    if (allPosted) return <span className="tag" style={{ color:"#A8E6CF", borderColor:"#A8E6CF33" }}>complete</span>;
+                    return <span className="tag" style={{ color:"#E8C547", borderColor:"#E8C54733" }}>in progress</span>;
+                  })()}
                 </div>
                 <div style={{ fontSize:12, color:"#555" }}>{b.hooks?.length||0} hooks · {new Date(b.createdAt).toLocaleDateString()}</div>
               </div>
@@ -448,7 +459,7 @@ function Briefs({ briefs, addBrief, deleteBrief, creators, addVideos, showToast,
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
                   <div><div style={{ fontSize:11, color:"#555", marginBottom:6, letterSpacing:"0.06em", textTransform:"uppercase" }}>Main body</div><div style={{ fontSize:13, color:"#999", lineHeight:1.6, whiteSpace:"pre-wrap" }}>{b.mainBody||"—"}</div></div>
                   <div>
-                    <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Style</div><div style={{ fontSize:13, color:"#7EC8E3", marginBottom:10 }}>{b.videoStyle||"—"}</div>
+                    <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Video delivery</div><div style={{ fontSize:13, color:"#7EC8E3", marginBottom:10 }}>{b.videoStyle||"—"}</div>
                     <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>CTA</div><div style={{ fontSize:13, color:"#999", marginBottom:10 }}>{b.cta||"—"}</div>
                     <div style={{ fontSize:11, color:"#555", marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Key visuals</div><div style={{ fontSize:13, color:"#999" }}>{b.keyVisuals||"—"}</div>
                   </div>
@@ -476,14 +487,14 @@ function AssignModal({ brief, creators, onAssign, onClose }) {
         {brief.videoStyle && <div style={{ fontSize:12, color:"#7EC8E3", marginBottom:16 }}>Style: {brief.videoStyle}</div>}
         <div style={{ marginBottom:12 }}><div className="field-label">Creator</div><select value={creatorId} onChange={e => setCreatorId(e.target.value)}><option value="">— Choose —</option>{creators.map(c => <option key={c.id} value={c.id}>{c.name} ({c.platform})</option>)}</select></div>
         <div style={{ marginBottom:20 }}><div className="field-label">Due date</div><input type="date" value={date} onChange={e => setDate(e.target.value)}/></div>
-        <div style={{ display:"flex", gap:8 }}><button className="btn-primary" onClick={() => creatorId && onAssign(brief,creatorId,date)} style={{ opacity:creatorId?1:0.5 }}>Assign 5 videos</button><button className="btn-ghost" onClick={onClose}>Cancel</button></div>
+        <div style={{ display:"flex", gap:8 }}><button className="btn-primary" onClick={() => creatorId && onAssign(brief,creatorId,date)} style={{ opacity:creatorId?1:0.5 }}>Assign {brief.hooks?.filter(h=>h&&h.trim()).length||0} videos</button><button className="btn-ghost" onClick={onClose}>Cancel</button></div>
       </div>
     </div>
   );
 }
 
 // ── Video Board ───────────────────────────────────────────────────────────────
-function VideoBoard({ videos, updateVideo, creators, briefs, showToast, setReviewing }) {
+function VideoBoard({ videos, updateVideo, deleteVideo, creators, briefs, showToast, setReviewing }) {
   const [filter,     setFilter]     = useState("all");
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().split("T")[0]);
   const [editingId,  setEditingId]  = useState(null);
@@ -533,12 +544,15 @@ function VideoBoard({ videos, updateVideo, creators, briefs, showToast, setRevie
                         <div style={{ marginBottom:6 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Status</div><select value={vid.status} onChange={e => updateVideo(vid.id,{status:e.target.value})} style={{ fontSize:11 }}>{STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                         <div style={{ marginBottom:6 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Video / Drive link</div><input placeholder="https://…" value={vid.videoUrl||""} onChange={e => updateVideo(vid.id,{videoUrl:e.target.value})} style={{ fontSize:11 }}/></div>
                         <div style={{ marginBottom:8 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Notes</div><textarea rows={2} value={vid.notes||""} onChange={e => updateVideo(vid.id,{notes:e.target.value})} style={{ fontSize:11, resize:"none" }}/></div>
-                        <button className="btn-ghost" style={{ fontSize:10, padding:"4px 10px" }} onClick={() => { setEditingId(null); showToast("Saved ✓"); }}>Done</button>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button className="btn-ghost" style={{ fontSize:10, padding:"4px 10px" }} onClick={() => { setEditingId(null); showToast("Saved ✓"); }}>Done</button>
+                          <button style={{ background:"none", border:"1px solid #5A2020", color:"#E05555", borderRadius:6, fontSize:10, padding:"4px 10px", cursor:"pointer" }} onClick={() => { if(window.confirm("Delete this video?")) { deleteVideo(vid.id); showToast("Deleted ✓"); } }}>Delete</button>
+                        </div>
                       </div>
                     ) : (
                       <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
                         <button className="btn-ghost" style={{ fontSize:10, padding:"3px 8px", flex:1 }} onClick={() => setEditingId(vid.id)}>Edit</button>
-                        {status==="review" && <button className="btn-primary" style={{ fontSize:10, padding:"3px 8px" }} onClick={() => setReviewing(vid.id)}>Review →</button>}
+                        {(status==="first draft"||status==="second draft") && <button className="btn-primary" style={{ fontSize:10, padding:"3px 8px" }} onClick={() => setReviewing(vid.id)}>Review →</button>}
                         <select value={vid.status} onChange={e => { updateVideo(vid.id,{status:e.target.value}); showToast("Updated ✓"); }} style={{ fontSize:10, padding:"3px 6px", width:"auto", flex:1 }}>{STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select>
                       </div>
                     )}

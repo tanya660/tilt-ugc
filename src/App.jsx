@@ -199,8 +199,11 @@ export default function App() {
   const todayStr    = new Date().toISOString().split("T")[0];
   const todayVideos = videos.filter(v => v.date === todayStr);
   const postedToday = todayVideos.filter(v => v.status === "posted").length;
+  const totalPosted = videos.filter(v => v.status === "posted").length;
+  const totalVideos = videos.length;
   const totalDue    = creators.filter(c => c.status === "active").length * 5;
-  const inProgress  = todayVideos.filter(v => !["assigned","posted"].includes(v.status)).length;
+  const inProgress  = videos.filter(v => !["assigned","posted"].includes(v.status)).length;
+  const completion  = totalVideos > 0 ? Math.round((totalPosted / totalVideos) * 100) : 0;
 
   if (!loaded) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", fontFamily:"'DM Mono',monospace", color:"#E8C547", fontSize:12, letterSpacing:"0.1em", background:"#0A0A0A" }}>
@@ -253,7 +256,7 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:1100, margin:"0 auto", padding:"28px 24px" }}>
-        {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefs={briefs} totalDue={totalDue} postedToday={postedToday} inProgress={inProgress} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
+        {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefs={briefs} totalDue={totalDue} postedToday={postedToday} totalPosted={totalPosted} totalVideos={totalVideos} inProgress={inProgress} completion={completion} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
         {view==="briefs"    && <Briefs briefs={briefs} addBrief={addBrief} deleteBrief={deleteBrief} updateBrief={updateBrief} creators={creators} videos={videos} addVideos={addVideos} showToast={showToast} activeBrief={activeBrief} setActiveBrief={setActiveBrief}/>}
         {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} deleteVideo={deleteVideo} creators={creators} briefs={briefs} showToast={showToast} setReviewing={setReviewing}/>}
         {view==="creators"  && <Creators creators={creators} addCreator={addCreator} updateCreator={updateCreator} videos={videos} showToast={showToast}/>}
@@ -266,27 +269,44 @@ export default function App() {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress, todayVideos, setView, setReviewing }) {
-  const activeBriefs  = briefs.filter(b => b.active);
-  const completion    = totalDue > 0 ? Math.round((postedToday/totalDue)*100) : 0;
-  const pendingReview = todayVideos.filter(v => v.status === "first draft" || v.status === "second draft");
+function Dashboard({ creators, videos, briefs, totalDue, postedToday, totalPosted, totalVideos, inProgress, completion, todayVideos, setView, setReviewing }) {
+  const [view, setDashView] = useState("total");
+  const activeBriefs   = briefs.filter(b => b.active);
+  const pendingReview  = todayVideos.filter(v => v.status === "first draft" || v.status === "second draft");
+  const todayPosted    = todayVideos.filter(v => v.status === "posted").length;
+  const todayActive    = todayVideos.filter(v => v.status !== "posted").length;
+  const todayCompletion= totalDue > 0 ? Math.round((todayPosted/totalDue)*100) : 0;
+
+  const stats = view === "total" ? [
+    { label:"Total posted",    val:totalPosted,   sub:`of ${totalVideos} assigned`,  accent:"#A8E6CF" },
+    { label:"In progress",     val:inProgress,    sub:"across all briefs",            accent:"#E8C547" },
+    { label:"Pending review",  val:pendingReview.length, sub:"need your eyes",        accent:"#F4A261" },
+    { label:"Completion rate", val:`${completion}%`, sub:"posted vs assigned",        accent:"#7EC8E3" },
+  ] : [
+    { label:"Posted today",    val:todayPosted,   sub:`of ${totalDue} due`,           accent:"#A8E6CF" },
+    { label:"Active today",    val:todayActive,   sub:"in pipeline today",             accent:"#E8C547" },
+    { label:"Pending review",  val:pendingReview.length, sub:"need your eyes",        accent:"#F4A261" },
+    { label:"Today target",    val:`${todayCompletion}%`, sub:"daily completion",     accent:"#7EC8E3" },
+  ];
 
   return (
     <div className="fade">
-      <div style={{ marginBottom:28 }}>
-        <h1 style={{ fontFamily:"'Archivo Black',sans-serif", fontSize:28, letterSpacing:"-0.03em" }}>
-          Good {new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"} 👋
-        </h1>
-        <p style={{ color:"#666", fontSize:13, marginTop:4 }}>Here's your content pipeline for today.</p>
+      <div style={{ marginBottom:24, display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
+        <div>
+          <h1 style={{ fontFamily:"'Archivo Black',sans-serif", fontSize:28, letterSpacing:"-0.03em" }}>
+            Good {new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"} 👋
+          </h1>
+          <p style={{ color:"#666", fontSize:13, marginTop:4 }}>Here's your content pipeline overview.</p>
+        </div>
+        <div style={{ display:"flex", gap:2, background:"#111", border:"1px solid #1E1E1E", borderRadius:8, padding:3 }}>
+          {[["total","All time"],["today","Today"]].map(([v,l]) => (
+            <button key={v} onClick={() => setDashView(v)} style={{ background:view===v?"#E8C547":"transparent", color:view===v?"#0A0A0A":"#666", border:"none", borderRadius:6, padding:"5px 14px", fontSize:11, fontFamily:"inherit", cursor:"pointer", letterSpacing:"0.04em", transition:"all 0.15s" }}>{l}</button>
+          ))}
+        </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:24 }}>
-        {[
-          { label:"Posted today",   val:postedToday,       sub:`of ${totalDue} due`,   accent:"#A8E6CF" },
-          { label:"In progress",    val:inProgress,        sub:"filming / editing",    accent:"#E8C547" },
-          { label:"Pending review", val:pendingReview.length, sub:"need your eyes",    accent:"#F4A261" },
-          { label:"Completion",     val:`${completion}%`,  sub:"daily target",         accent:"#7EC8E3" },
-        ].map(s => (
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
+        {stats.map(s => (
           <div key={s.label} className="card">
             <div style={{ fontSize:11, color:"#555", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:8 }}>{s.label}</div>
             <div className="stat-num" style={{ color:s.accent }}>{s.val}</div>
@@ -296,12 +316,14 @@ function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress
       </div>
 
       <div className="card" style={{ marginBottom:16 }}>
-        <div style={{ fontSize:11, color:"#555", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:16 }}>Creator progress — today</div>
+        <div style={{ fontSize:11, color:"#555", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:16 }}>Creator progress — all time</div>
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {creators.filter(c => c.status==="active").map(cr => {
-            const mine   = todayVideos.filter(v => v.creatorId===cr.id);
-            const posted = mine.filter(v => v.status==="posted").length;
-            const pct    = Math.round((posted/5)*100);
+            const allMine   = videos.filter(v => v.creatorId===cr.id);
+            const posted    = allMine.filter(v => v.status==="posted").length;
+            const total     = allMine.length;
+            const pct       = total > 0 ? Math.round((posted/total)*100) : 0;
+            const todayMine = todayVideos.filter(v => v.creatorId===cr.id);
             return (
               <div key={cr.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <div style={{ width:30, height:30, borderRadius:"50%", background:cr.color+"22", border:`1px solid ${cr.color}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:cr.color, flexShrink:0 }}>{cr.avatar}</div>
@@ -309,9 +331,9 @@ function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress
                 <div style={{ flex:1, height:4, background:"#1A1A1A", borderRadius:2, overflow:"hidden" }}>
                   <div style={{ height:"100%", width:`${pct}%`, background:cr.color, borderRadius:2, transition:"width 0.4s" }}/>
                 </div>
-                <div style={{ fontSize:12, color:"#555", minWidth:40, textAlign:"right" }}>{posted}/5</div>
+                <div style={{ fontSize:12, color:"#555", minWidth:60, textAlign:"right" }}>{posted}/{total}</div>
                 <div style={{ display:"flex", gap:4 }}>
-                  {[0,1,2,3,4].map(i => { const vid=mine[i]; return <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:vid?STATUS_COLORS[vid.status]:"#1E1E1E", border:"1px solid #2A2A2A" }} title={vid?.status||"not assigned"}/>; })}
+                  {todayMine.slice(0,5).map((vid,i) => <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:STATUS_COLORS[vid.status]||"#1E1E1E", border:"1px solid #2A2A2A" }} title={vid.status}/>)}
                 </div>
               </div>
             );
@@ -358,7 +380,7 @@ function Dashboard({ creators, videos, briefs, totalDue, postedToday, inProgress
               </div>
             ) : null;
           })}
-          {todayVideos.length===0 && <p style={{color:"#444",fontSize:13}}>No videos assigned today</p>}
+          {todayVideos.length===0 && <p style={{color:"#444",fontSize:13}}>No videos due today</p>}
         </div>
       </div>
     </div>
@@ -571,8 +593,11 @@ function AssignModal({ brief, creators, onAssign, onClose }) {
 // ── Video Board ───────────────────────────────────────────────────────────────
 function VideoBoard({ videos, updateVideo, deleteVideo, creators, briefs, showToast, setReviewing }) {
   const [filter,     setFilter]     = useState("all");
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().split("T")[0]);
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [dateFilter, setDateFilter] = useState(todayStr);
   const [editingId,  setEditingId]  = useState(null);
+  const [dragId,     setDragId]     = useState(null);
+  const [dragOver,   setDragOver]   = useState(null);
 
   const filtered = videos.filter(v => {
     if (filter !== "all" && v.creatorId !== filter) return false;
@@ -581,19 +606,68 @@ function VideoBoard({ videos, updateVideo, deleteVideo, creators, briefs, showTo
   });
   const grouped = STATUSES.reduce((acc,s) => { acc[s]=filtered.filter(v => v.status===s); return acc; }, {});
 
+  const formatDate = (d) => {
+    if (!d) return "";
+    const diff = Math.ceil((new Date(d) - new Date(todayStr)) / (1000*60*60*24));
+    if (diff === 0) return "due today";
+    if (diff === 1) return "due tomorrow";
+    if (diff < 0) return `${Math.abs(diff)}d overdue`;
+    return `due ${new Date(d).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}`;
+  };
+  const dateColor = (d) => {
+    if (!d) return "#444";
+    const diff = Math.ceil((new Date(d) - new Date(todayStr)) / (1000*60*60*24));
+    if (diff < 0) return "#E05555";
+    if (diff === 0) return "#E8C547";
+    return "#555";
+  };
+
+  // Drag handlers
+  const onDragStart = (e, vidId) => {
+    setDragId(vidId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const onDragOver = (e, status) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver(status);
+  };
+  const onDrop = (e, status) => {
+    e.preventDefault();
+    if (dragId && status) {
+      updateVideo(dragId, { status });
+      showToast(`Moved to ${status} ✓`);
+    }
+    setDragId(null);
+    setDragOver(null);
+  };
+  const onDragEnd = () => { setDragId(null); setDragOver(null); };
+
   return (
     <div className="fade">
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
-        <div><h2 style={{ fontFamily:"'Archivo Black',sans-serif", fontSize:22, letterSpacing:"-0.02em" }}>Video Board</h2><p style={{ fontSize:12, color:"#555", marginTop:3 }}>Track every video from brief to posted</p></div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div><h2 style={{ fontFamily:"'Archivo Black',sans-serif", fontSize:22, letterSpacing:"-0.02em" }}>Video Board</h2><p style={{ fontSize:12, color:"#555", marginTop:3 }}>Drag cards between columns to update status</p></div>
       </div>
-      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
         <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ width:"auto" }}/>
-        <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width:"auto" }}><option value="all">All creators</option>{creators.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-        <button className="btn-ghost" onClick={() => setDateFilter("")} style={{ fontSize:11 }}>All dates</button>
+        <button className="btn-ghost" onClick={() => setDateFilter(todayStr)} style={{ fontSize:11, background: dateFilter===todayStr?"#1A1A1A":"" }}>Today</button>
+        <button className="btn-ghost" onClick={() => setDateFilter("")} style={{ fontSize:11, background: dateFilter===""?"#1A1A1A":"" }}>All dates</button>
+        <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width:"auto" }}>
+          <option value="all">All creators</option>
+          {creators.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <span style={{ fontSize:11, color:"#444" }}>{filtered.length} video{filtered.length!==1?"s":""}</span>
       </div>
+
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
         {STATUSES.map(status => (
-          <div key={status} style={{ background:"#0D0D0D", border:"1px solid #181818", borderRadius:8, padding:12 }}>
+          <div
+            key={status}
+            style={{ background: dragOver===status?"#141814":"#0D0D0D", border:`1px solid ${dragOver===status?"#2A4A2A":"#181818"}`, borderRadius:8, padding:12, transition:"all 0.15s", minHeight:120 }}
+            onDragOver={e => onDragOver(e, status)}
+            onDrop={e => onDrop(e, status)}
+            onDragLeave={() => setDragOver(null)}
+          >
             <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
               <div style={{ width:6, height:6, borderRadius:"50%", background:STATUS_COLORS[status] }}/>
               <span style={{ fontSize:11, color:"#888", textTransform:"capitalize", letterSpacing:"0.06em" }}>{status}</span>
@@ -601,22 +675,31 @@ function VideoBoard({ videos, updateVideo, deleteVideo, creators, briefs, showTo
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {(grouped[status]||[]).map(vid => {
-                const creator = creators.find(c => c.id===vid.creatorId);
-                const brief   = briefs.find(b => b.id===vid.briefId);
+                const creator  = creators.find(c => c.id===vid.creatorId);
+                const brief    = briefs.find(b => b.id===vid.briefId);
                 const isEditing = editingId===vid.id;
+                const isDragging = dragId===vid.id;
                 return (
-                  <div key={vid.id} className="card" style={{ padding:12, borderColor:isEditing?"#E8C54744":"#1A1A1A" }}>
+                  <div
+                    key={vid.id}
+                    draggable={!isEditing}
+                    onDragStart={e => onDragStart(e, vid.id)}
+                    onDragEnd={onDragEnd}
+                    className="card"
+                    style={{ padding:12, borderColor:isEditing?"#E8C54744":"#1A1A1A", opacity:isDragging?0.4:1, cursor:isEditing?"default":"grab", transition:"opacity 0.15s" }}
+                  >
                     <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
                       <div style={{ width:18, height:18, borderRadius:"50%", background:creator?.color+"22", border:`1px solid ${creator?.color}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:8, color:creator?.color }}>{creator?.avatar}</div>
                       <span style={{ fontSize:11, color:"#888" }}>{creator?.name}</span>
                       <span className="tag" style={{ marginLeft:"auto", fontSize:10 }}>{vid.platform}</span>
                     </div>
                     <div style={{ fontSize:12, color:"#E8E8E0", marginBottom:4, lineHeight:1.4 }}>{vid.hook}</div>
-                    {vid.videoStyle && <div style={{ fontSize:10, color:"#7EC8E3", marginBottom:4 }}>{vid.videoStyle}</div>}
-                    {brief && <div style={{ fontSize:10, color:"#444", marginBottom:8 }}>{brief.title}</div>}
+                    {vid.videoStyle && <div style={{ fontSize:10, color:"#7EC8E3", marginBottom:3 }}>{vid.videoStyle}</div>}
+                    {brief && <div style={{ fontSize:10, color:"#444", marginBottom:3 }}>{brief.title}</div>}
+                    {vid.date && <div style={{ fontSize:10, color:dateColor(vid.date), marginBottom:8 }}>{formatDate(vid.date)}</div>}
+
                     {isEditing ? (
                       <div>
-                        <div style={{ marginBottom:6 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Status</div><select value={vid.status} onChange={e => updateVideo(vid.id,{status:e.target.value})} style={{ fontSize:11 }}>{STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                         <div style={{ marginBottom:6 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Video / Drive link</div><input placeholder="https://…" value={vid.videoUrl||""} onChange={e => updateVideo(vid.id,{videoUrl:e.target.value})} style={{ fontSize:11 }}/></div>
                         <div style={{ marginBottom:8 }}><div style={{ fontSize:10, color:"#555", marginBottom:3 }}>Notes</div><textarea rows={2} value={vid.notes||""} onChange={e => updateVideo(vid.id,{notes:e.target.value})} style={{ fontSize:11, resize:"none" }}/></div>
                         <div style={{ display:"flex", gap:6 }}>
@@ -628,13 +711,16 @@ function VideoBoard({ videos, updateVideo, deleteVideo, creators, briefs, showTo
                       <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
                         <button className="btn-ghost" style={{ fontSize:10, padding:"3px 8px", flex:1 }} onClick={() => setEditingId(vid.id)}>Edit</button>
                         {(status==="first draft"||status==="second draft") && <button className="btn-primary" style={{ fontSize:10, padding:"3px 8px" }} onClick={() => setReviewing(vid.id)}>Review →</button>}
-                        <select value={vid.status} onChange={e => { updateVideo(vid.id,{status:e.target.value}); showToast("Updated ✓"); }} style={{ fontSize:10, padding:"3px 6px", width:"auto", flex:1 }}>{STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select>
                       </div>
                     )}
                   </div>
                 );
               })}
-              {(grouped[status]||[]).length===0 && <div style={{ fontSize:11, color:"#333", textAlign:"center", padding:"12px 0" }}>—</div>}
+              {(grouped[status]||[]).length===0 && (
+                <div style={{ fontSize:11, color: dragOver===status?"#4A8A4A":"#333", textAlign:"center", padding:"16px 0", border:`2px dashed ${dragOver===status?"#2A5A2A":"#1A1A1A"}`, borderRadius:6, transition:"all 0.15s" }}>
+                  {dragOver===status ? "drop here" : "—"}
+                </div>
+              )}
             </div>
           </div>
         ))}

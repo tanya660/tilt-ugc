@@ -393,6 +393,7 @@ function Briefs({ briefs, addBrief, deleteBrief, updateBrief, creators, videos, 
   const [assignModal, setAssignModal] = useState(null);
   const [editingBrief, setEditingBrief] = useState(null);
   const [editForm,    setEditForm]    = useState(null);
+  const [search,      setSearch]      = useState("");
   const [form, setForm] = useState({ title:"", product:"", mainBody:"", cta:"", keyVisuals:"", videoStyle:"Talking head", inspirationUrl:"", inspirationNote:"", hooks:["","","","",""], active:true });
 
   const createBrief = async () => {
@@ -488,8 +489,30 @@ function Briefs({ briefs, addBrief, deleteBrief, updateBrief, creators, videos, 
       )}
 
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {briefs.length===0 && <div style={{ color:"#444", fontSize:14, textAlign:"center", padding:"40px 0" }}>No briefs yet.</div>}
-        {briefs.map(b => (
+        {/* Search bar */}
+        <div style={{ position:"relative", marginBottom:4 }}>
+          <div style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:13, color:"#444", pointerEvents:"none" }}>⌕</div>
+          <input
+            placeholder="Search briefs — title, hooks, body…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ paddingLeft:32, background:"#0D0D0D", borderColor:"#1E1E1E" }}
+          />
+          {search && <button onClick={() => setSearch("")} style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#555", fontSize:14, cursor:"pointer", lineHeight:1 }}>✕</button>}
+        </div>
+
+        {(() => {
+          const q = search.toLowerCase().trim();
+          const filtered = q ? briefs.filter(b =>
+            b.title?.toLowerCase().includes(q) ||
+            b.product?.toLowerCase().includes(q) ||
+            b.mainBody?.toLowerCase().includes(q) ||
+            b.cta?.toLowerCase().includes(q) ||
+            b.videoStyle?.toLowerCase().includes(q) ||
+            (b.hooks||[]).some(h => h?.toLowerCase().includes(q))
+          ) : briefs;
+          if (filtered.length === 0) return <div style={{ color:"#444", fontSize:13, textAlign:"center", padding:"30px 0" }}>{q ? `No briefs matching "${q}"` : "No briefs yet."}</div>;
+          return filtered.map(b => (
           <div key={b.id} className="card" style={{ cursor:"pointer", borderColor: editingBrief===b.id ? "#E8C54788" : activeBrief?.id===b.id?"#E8C54755":"#1E1E1E" }} onClick={() => editingBrief!==b.id && setActiveBrief(activeBrief?.id===b.id?null:b)}>
 
             {/* Edit form — inline */}
@@ -566,7 +589,8 @@ function Briefs({ briefs, addBrief, deleteBrief, updateBrief, creators, videos, 
               </>
             )}
           </div>
-        ))}
+          ));
+        })()}
       </div>
       {assignModal && <AssignModal brief={assignModal} creators={creators} onAssign={assignBrief} onClose={() => setAssignModal(null)}/>}
     </div>

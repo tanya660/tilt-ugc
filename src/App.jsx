@@ -91,12 +91,6 @@ const mapVideo = r => r ? ({
   postedDate: r.posted_date||"",
 }) : null;
 
-const mapTip = r => r ? ({
-  id: r.id, title: r.title, category: r.category||"Delivery",
-  body: r.body||"", videoUrl: r.video_url||"",
-  isLesson: r.is_lesson||false, createdAt: r.created_at,
-}) : null;
-
 const mapBriefIdea = r => r ? ({
   id: r.id, creatorId: r.creator_id, title: r.title,
   description: r.description||"", status: r.status||"pending",
@@ -128,7 +122,6 @@ export default function App() {
   const [view,           setView]           = useState("dashboard");
   const [creators,       setCreators]       = useState([]);
   const [videos,         setVideos]         = useState([]);
-  const [tips,           setTips]           = useState([]);
   const [briefIdeas,     setBriefIdeas]     = useState([]);
   const [bonuses,        setBonuses]        = useState([]);
   const [reviewing,      setReviewing]      = useState(null);
@@ -153,16 +146,14 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const [{ data: c }, { data: v }, { data: t }, { data: bi }, { data: bo }] = await Promise.all([
+      const [{ data: c }, { data: v }, { data: bi }, { data: bo }] = await Promise.all([
         supabase.from("creators").select("*").order("created_at"),
         supabase.from("videos").select("*").order("created_at", { ascending: false }),
-        supabase.from("tips").select("*").order("created_at", { ascending: false }),
         supabase.from("brief_ideas").select("*").order("created_at", { ascending: false }),
         supabase.from("creator_bonuses").select("*").order("assigned_at", { ascending: false }),
       ]);
       setCreators((c||[]).map(mapCreator));
       setVideos((v||[]).map(mapVideo));
-      setTips((t||[]).map(mapTip));
       setBriefIdeas((bi||[]).map(mapBriefIdea));
       setBonuses((bo||[]).map(mapBonus));
       setLoaded(true);
@@ -227,17 +218,6 @@ export default function App() {
   const deleteVideo = async (id) => {
     await supabase.from("videos").delete().eq("id", id);
     setVideos(prev => prev.filter(v => v.id !== id));
-  };
-
-  // ── Tip ops ──
-  const addTip = async (data) => {
-    const dbRow = { id: data.id, title: data.title, category: data.category, body: data.body, video_url: data.videoUrl, is_lesson: data.isLesson };
-    const { data: row } = await supabase.from("tips").insert([dbRow]).select().single();
-    if (row) setTips(prev => [mapTip(row), ...prev]);
-  };
-  const deleteTip = async (id) => {
-    await supabase.from("tips").delete().eq("id", id);
-    setTips(prev => prev.filter(t => t.id !== id));
   };
 
   // ── Brief idea ops ──
@@ -341,7 +321,7 @@ export default function App() {
         <div style={{ display:"flex", alignItems:"center", gap:32 }}>
           <span style={{ fontWeight:700, fontSize:15, color:"#111111", letterSpacing:"-0.02em" }}>Tilt UGC</span>
           <div style={{ display:"flex", gap:0 }}>
-            {[["dashboard","Dashboard"],["board","Video Board"],["creators","Creators"],["strategy","Strategy"]].map(([v,l]) => (
+            {[["dashboard","Dashboard"],["board","Video Board"],["creators","Creators"],["invoicing","Invoicing"]].map(([v,l]) => (
               <button key={v} className={`nav-link${view===v?" active":""}`} onClick={() => setView(v)}>{l}</button>
             ))}
           </div>
@@ -362,7 +342,7 @@ export default function App() {
         {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefIdeas={briefIdeas} updateBriefIdea={updateBriefIdea} totalPosted={totalPosted} totalVideos={totalVideos} inProgress={inProgress} completion={completion} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
         {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} deleteVideo={deleteVideo} creators={creators} showToast={showToast} setReviewing={setReviewing}/>}
         {view==="creators"  && <Creators creators={creators} addCreator={addCreator} updateCreator={updateCreator} videos={videos} bonuses={bonuses} addBonus={addBonus} showToast={showToast}/>}
-        {view==="strategy"  && <Strategy creators={creators} videos={videos} tips={tips} addTip={addTip} deleteTip={deleteTip} showToast={showToast}/>}
+        {view==="invoicing" && <AdminInvoicing creators={creators} videos={videos} bonuses={bonuses} showToast={showToast}/>}
       </div>
 
       {toast && <div style={{ position:"fixed", bottom:24, right:24, background:"#111111", color:"#FFFFFF", padding:"10px 18px", borderRadius:8, fontSize:13, fontWeight:500, zIndex:999, boxShadow:"0 4px 12px rgba(0,0,0,0.15)" }}>{toast}</div>}
@@ -1031,194 +1011,129 @@ function CreatorProfile({ cr, updateCreator, videos, onClose, showToast }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── ADMIN: STRATEGY ──────────────────────────────────────────────────────────
+// ── ADMIN: INVOICING ─────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function Strategy({ creators, videos, tips, addTip, deleteTip, showToast }) {
-  const [tab, setTab] = useState("why");
-  const tabs = [["why","Why this system"],["playbook","Daily playbook"],["hooks","Hook science"],["scale","How to scale"],["tips","Creator tips"]];
+function AdminInvoicing({ creators, videos, bonuses, showToast }) {
+  const [filter, setFilter] = useState("all");
+  const now = new Date();
+  const thisMonday = getMondayOfWeek(now);
+  const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
+
+  // Per-creator invoice data
+  const activeCreators = creators.filter(c => c.status === "active");
+  const creatorData = activeCreators.map(cr => {
+    const myVideos = videos.filter(v => v.creatorId === cr.id);
+    const invoiceable = myVideos.filter(v =>
+      v.status === "posted" && v.videoUrl && !v.invoiced &&
+      v.postedDate && new Date(v.postedDate) >= sevenDaysAgo
+    );
+    const invoiced = myVideos.filter(v => v.invoiced);
+    const rate = cr.ratePerVideo || 0;
+    const bonus = bonuses.find(b => b.creatorId === cr.id && b.weekStart === thisMonday);
+    const pendingTotal = (invoiceable.length * rate) + (bonus ? bonus.amount : 0);
+    const totalPaid = invoiced.length * rate;
+    return { cr, invoiceable, invoiced, rate, bonus, pendingTotal, totalPaid, totalVideos: myVideos.length, posted: myVideos.filter(v => v.status === "posted").length };
+  });
+
+  const totalPending = creatorData.reduce((sum, d) => sum + d.pendingTotal, 0);
+  const totalInvoiceable = creatorData.reduce((sum, d) => sum + d.invoiceable.length, 0);
+  const totalInvoiced = creatorData.reduce((sum, d) => sum + d.invoiced.length, 0);
+  const totalPaidOut = creatorData.reduce((sum, d) => sum + d.totalPaid, 0);
+
+  const filtered = filter === "all" ? creatorData : creatorData.filter(d => d.cr.id === filter);
+
   return (
     <div className="fade">
-      <div style={{ marginBottom:24 }}><h2 style={{ fontWeight:600, fontSize:22 }}>Strategy & Playbook</h2><p style={{ fontSize:13, color:"#6B6B6B", marginTop:3 }}>Built from r/ClaudeAI · r/marketing · r/startups</p></div>
-      <div style={{ display:"flex", gap:0, marginBottom:20, borderBottom:"1px solid #E5E5E5" }}>
-        {tabs.map(([v,l]) => <button key={v} className={`nav-link${tab===v?" active":""}`} style={{ fontSize:13 }} onClick={() => setTab(v)}>{l}</button>)}
+      <div style={{ marginBottom:24 }}>
+        <h2 style={{ fontWeight:600, fontSize:22 }}>Invoicing</h2>
+        <p style={{ fontSize:13, color:"#6B6B6B", marginTop:3 }}>Track payments and outstanding invoices across creators</p>
       </div>
-      {tab==="why"      && <StrategyWhy creators={creators}/>}
-      {tab==="playbook" && <StrategyPlaybook/>}
-      {tab==="hooks"    && <StrategyHooks/>}
-      {tab==="scale"    && <StrategyScale/>}
-      {tab==="tips"     && <CreatorTips tips={tips} addTip={addTip} deleteTip={deleteTip} showToast={showToast}/>}
-    </div>
-  );
-}
 
-function Block({ title, label, labelColor, children }) {
-  return (
-    <div className="card" style={{ marginBottom:12, borderLeft:`3px solid ${labelColor||"#E8C547"}` }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-        {label && <span style={{ fontSize:10, padding:"3px 8px", borderRadius:100, background:labelColor+"15", color:labelColor, fontWeight:500 }}>{label}</span>}
-        <span style={{ fontSize:14, fontWeight:500 }}>{title}</span>
-      </div>
-      <div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7 }}>{children}</div>
-    </div>
-  );
-}
-
-function StrategyWhy({ creators }) {
-  const n = creators.filter(c => c.status==="active").length;
-  return (
-    <div>
-      <div className="card" style={{ marginBottom:20 }}>
-        <div style={{ fontWeight:600, fontSize:18, marginBottom:8 }}>The volume-first UGC model</div>
-        <div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7 }}>Reddit's top UGC threads agree: the #1 mistake brands make is betting on 1–2 hero videos. The algorithm rewards <strong style={{ color:"#111111" }}>volume + variation</strong>. With {n} creators × 5 videos = <strong style={{ color:"#E8C547" }}>{n*5} videos/day</strong>, you run a natural split-test on hooks every 24 hours.</div>
-      </div>
-      <Block title="Same body, different hook — the split-test engine" label="CORE PRINCIPLE" labelColor="#E8C547">The main body script is your proven message. The hook determines whether someone stops scrolling. Keeping the body identical and varying only the hook gives you a clean A/B test every day.</Block>
-      <Block title="Why 5 videos per creator?" label="FROM r/STARTUPS" labelColor="#2563EB">Founders report that posting frequency under 3 videos/day per account leads to stagnant reach. 5 is the sweet spot.</Block>
-      <Block title="Why multiple creators for the same brief?" label="FROM r/MARKETING" labelColor="#D97706">Different creators attract different audiences. Same brief across all creators = audience diversification for free.</Block>
-      <Block title="UGC builds trust that ads can't buy" label="REDDIT CONSENSUS" labelColor="#16A34A">UGC converts 4–6× better than polished brand ads. Your daily videos function as both ads and social proof simultaneously.</Block>
-    </div>
-  );
-}
-
-function StrategyPlaybook() {
-  const steps = [
-    { time:"8:00am", action:"Morning brief",    detail:"Lock the day's brief. All creators have their assignments.",   why:"Creators need hooks before they start.", color:"#E8C547" },
-    { time:"9:00am", action:"Creators film",    detail:"Each creator films hook variations back-to-back.",              why:"Batch filming = performance mode once.",  color:"#D97706" },
-    { time:"12:00pm",action:"Editing window",   detail:"Only the hook section changes per version.",                    why:"One body edit = 80% done.",               color:"#2563EB" },
-    { time:"2:00pm", action:"Review & approve", detail:"Review all videos using the checklist.",                        why:"Central approval prevents off-brand content.", color:"#16A34A" },
-    { time:"3–7pm",  action:"Staggered posting",detail:"Creators post throughout peak hours — NOT all at once.",        why:"Staggering prevents algorithm suppression.", color:"#7C3AED" },
-    { time:"8:00pm", action:"Daily debrief",    detail:"Check which hooks are getting the most views/saves.",           why:"Hour 1–2 signal predicts total reach.",    color:"#E8C547" },
-  ];
-  return (
-    <div>
-      <div className="card" style={{ marginBottom:20 }}><div style={{ fontWeight:600, fontSize:16, marginBottom:4 }}>Daily operating rhythm</div><div style={{ fontSize:13, color:"#6B6B6B" }}>Creators × 5 videos · staggered posting</div></div>
-      {steps.map((s,i) => (
-        <div key={i} style={{ display:"grid", gridTemplateColumns:"80px 1fr" }}>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-            <div style={{ width:32, height:32, borderRadius:"50%", background:s.color+"15", border:`1px solid ${s.color}30`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:s.color, fontWeight:600 }}>{i+1}</div>
-            {i<steps.length-1 && <div style={{ width:1, flex:1, background:"#E5E5E5", margin:"4px 0" }}/>}
-          </div>
-          <div className="card" style={{ marginBottom:10, marginLeft:12 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}><span style={{ fontSize:12, color:s.color, fontWeight:500 }}>{s.time}</span><span style={{ fontSize:13, fontWeight:500 }}>{s.action}</span></div>
-            <div style={{ fontSize:13, color:"#6B6B6B", marginBottom:8, lineHeight:1.5 }}>{s.detail}</div>
-            <div style={{ fontSize:12, color:"#6B6B6B", background:"#FAFAFA", padding:"8px 10px", borderRadius:6, borderLeft:`2px solid ${s.color}` }}><strong style={{ color:"#111111" }}>Why: </strong>{s.why}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StrategyHooks() {
-  const frameworks = [
-    { name:"The POV hook",        template:"POV: you discovered [X] and now…",          why:"Creates instant identification. POV hooks outperform direct-address by ~40% on TikTok.", example:"POV: you found Tilt and now you can't shop anywhere else" },
-    { name:"The result hook",     template:"I tried [X] for [N] days. Here's what happened.", why:"Promise of a story arc — viewer commits because they want the result.", example:"I shopped only Tilt for 30 days. Here's the honest truth." },
-    { name:"The secret hook",     template:"Nobody talks about this — but [X]…",          why:"FOMO + exclusivity. Gets high share rates.", example:"Nobody talks about this — but Tilt has the best Y2K pieces right now" },
-    { name:"The pattern interrupt",template:"Wait — you're still not [doing X]?",         why:"Breaks the scroll with a direct challenge.", example:"Wait — you're still not checking Tilt for vintage finds?" },
-    { name:"The honest review",   template:"The honest truth about [X] after [N] days",   why:"'Honest' framing makes claims more believable.", example:"The honest truth about buying pre-loved on Tilt" },
-  ];
-  return (
-    <div>
-      <div className="card" style={{ marginBottom:20 }}><div style={{ fontWeight:600, fontSize:16, marginBottom:6 }}>Hook science — the first 3 seconds</div><div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7 }}>The hook is the <strong style={{ color:"#E8C547" }}>only part of your video that earns the watch</strong>. 70% of your testing effort should go on hooks.</div></div>
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {frameworks.map((f,i) => (
-          <div key={i} className="card">
-            <div style={{ fontSize:14, fontWeight:600, marginBottom:6 }}>{f.name}</div>
-            <div style={{ fontSize:13, color:"#A0A0A0", marginBottom:8, fontStyle:"italic" }}>{f.template}</div>
-            <div style={{ fontSize:13, color:"#6B6B6B", marginBottom:10, lineHeight:1.6 }}>{f.why}</div>
-            <div style={{ background:"#F0FDF4", borderRadius:6, padding:"8px 12px", fontSize:12, color:"#16A34A", borderLeft:"2px solid #16A34A" }}><strong style={{ color:"#111111" }}>Example: </strong>{f.example}</div>
+      {/* Summary stats */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
+        {[
+          { label:"Pending this week", val:`£${totalPending.toFixed(2)}`, sub:`${totalInvoiceable} videos`, color: totalPending > 0 ? "#D97706" : "#111111" },
+          { label:"Total invoiced", val:totalInvoiced, sub:"videos paid for" },
+          { label:"Total paid out", val:`£${totalPaidOut.toFixed(2)}`, sub:"all time" },
+          { label:"Active creators", val:activeCreators.length, sub:`${activeCreators.filter(c => c.ratePerVideo > 0).length} with rates set` },
+        ].map(s => (
+          <div key={s.label} className="card">
+            <div className="section-label" style={{ marginBottom:8 }}>{s.label}</div>
+            <div className="stat-num" style={{ color: s.color || "#111111" }}>{s.val}</div>
+            <div style={{ fontSize:12, color:"#A0A0A0", marginTop:4 }}>{s.sub}</div>
           </div>
         ))}
       </div>
-    </div>
-  );
-}
 
-function StrategyScale() {
-  const phases = [
-    { phase:"Phase 1", title:"Prove the system (weeks 1–4)",       color:"#E8C547", steps:["Run 1 brief per week. Track which hook type wins.","Identify your best-performing creator per platform.","Only iterate hooks based on data.","Build a hook leaderboard."] },
-    { phase:"Phase 2", title:"Double down on winners (weeks 5–8)", color:"#2563EB", steps:["Take your top 3 hooks — give each creator a variation.","Introduce platform-specific brief variations.","Start a second brief track: awareness vs conversion.","Add a creator who specialises in the format that's working."] },
-    { phase:"Phase 3", title:"Scale to machine (month 3+)",        color:"#D97706", steps:["Build a hook vault — rotate every 4–6 weeks.","Use Claude to generate 20 hook variations per brief.","Amplify: take top 2 organic videos each week as paid.","Track LTV by hook type."] },
-  ];
-  return (
-    <div>
-      <div className="card" style={{ marginBottom:20 }}><div style={{ fontWeight:600, fontSize:16, marginBottom:6 }}>Long-term scaling roadmap</div><div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7 }}>From r/startups: "The brands winning at UGC aren't creating better content — they're creating faster feedback loops."</div></div>
-      {phases.map((p,i) => (
-        <div key={i} className="card" style={{ marginBottom:12, borderLeft:`3px solid ${p.color}` }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}><span style={{ fontSize:10, padding:"3px 8px", borderRadius:100, background:p.color+"15", color:p.color, fontWeight:500 }}>{p.phase}</span><span style={{ fontSize:14, fontWeight:500 }}>{p.title}</span></div>
-          {p.steps.map((s,j) => <div key={j} style={{ display:"flex", gap:8, fontSize:13, color:"#6B6B6B", lineHeight:1.5, marginBottom:6 }}><span style={{ color:p.color }}>→</span><span>{s}</span></div>)}
+      {/* Filter */}
+      <div style={{ marginBottom:16 }}>
+        <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width:"auto" }}>
+          <option value="all">All creators</option>
+          {activeCreators.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+
+      {/* Per-creator breakdown */}
+      {filtered.map(({ cr, invoiceable, invoiced, rate, bonus, pendingTotal }) => (
+        <div key={cr.id} className="card" style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
+            <div style={{ width:36, height:36, borderRadius:"50%", background:cr.color+"15", border:`1px solid ${cr.color}30`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:cr.color, fontWeight:600, flexShrink:0 }}>{cr.avatar}</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:500 }}>{cr.name}</div>
+              <div style={{ fontSize:12, color:"#6B6B6B" }}>{rate > 0 ? `£${rate}/video` : "No rate set"}</div>
+            </div>
+            {pendingTotal > 0 && <div style={{ textAlign:"right" }}>
+              <div style={{ fontSize:18, fontWeight:700, color:"#D97706" }}>£{pendingTotal.toFixed(2)}</div>
+              <div style={{ fontSize:11, color:"#A0A0A0" }}>pending</div>
+            </div>}
+            {pendingTotal === 0 && <div style={{ textAlign:"right" }}>
+              <div style={{ fontSize:13, color:"#16A34A", fontWeight:500 }}>All clear</div>
+            </div>}
+          </div>
+
+          {/* Invoiceable videos */}
+          {invoiceable.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:500, color:"#D97706", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:6 }}>Awaiting invoice ({invoiceable.length})</div>
+              {invoiceable.map(v => (
+                <div key={v.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #F5F5F5", fontSize:12 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontWeight:600, color:"#6B6B6B" }}>{v.videoId || "—"}</span>
+                    <span style={{ color:"#111111" }}>{(v.hook||"").slice(0,40)}{(v.hook||"").length>40?"…":""}</span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    {v.postedDate && <span style={{ color:"#A0A0A0", fontSize:11 }}>{formatDateShort(v.postedDate)}</span>}
+                    <span style={{ fontWeight:500 }}>£{rate.toFixed(2)}</span>
+                  </div>
+                </div>
+              ))}
+              {bonus && (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #F5F5F5", fontSize:12, color:"#16A34A" }}>
+                  <span style={{ fontWeight:500 }}>Performance bonus</span>
+                  <span style={{ fontWeight:500 }}>£{bonus.amount.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recently invoiced */}
+          {invoiced.length > 0 && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:500, color:"#16A34A", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:6 }}>Invoiced ({invoiced.length})</div>
+              <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                {invoiced.slice(0,10).map(v => (
+                  <span key={v.id} style={{ fontSize:11, padding:"3px 8px", borderRadius:100, background:"#F0FDF4", color:"#16A34A" }}>{v.videoId || v.id.slice(0,8)}</span>
+                ))}
+                {invoiced.length > 10 && <span style={{ fontSize:11, color:"#A0A0A0", padding:"3px 4px" }}>+{invoiced.length - 10} more</span>}
+              </div>
+            </div>
+          )}
+
+          {invoiceable.length === 0 && invoiced.length === 0 && (
+            <div style={{ fontSize:12, color:"#A0A0A0" }}>No invoice activity yet</div>
+          )}
         </div>
       ))}
-    </div>
-  );
-}
-
-function CreatorTips({ tips, addTip, deleteTip, showToast }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ title:"", category:"Delivery", body:"", videoUrl:"", isLesson:false });
-  const [active, setActive] = useState(null);
-  const TIP_CATS = ["Delivery","Hook","Lighting","Audio","Editing","Brand","Platform","Mindset"];
-  const CAT_C = { Delivery:"#2563EB", Hook:"#E8C547", Lighting:"#D97706", Audio:"#7C3AED", Editing:"#16A34A", Brand:"#E8C547", Platform:"#2563EB", Mindset:"#16A34A" };
-
-  const handleAdd = async () => {
-    if (!form.title) return;
-    await addTip({ ...form, id:Date.now().toString(), createdAt:new Date().toISOString() });
-    setShowAdd(false);
-    setForm({ title:"", category:"Delivery", body:"", videoUrl:"", isLesson:false });
-    showToast("Tip added");
-  };
-
-  const TipCard = ({ tip }) => {
-    const col = CAT_C[tip.category]||"#6B6B6B";
-    return (
-      <div className="card" style={{ cursor:"pointer", borderLeft:`3px solid ${col}` }} onClick={() => setActive(active===tip.id?null:tip.id)}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
-              <span style={{ fontSize:13, fontWeight:500 }}>{tip.title}</span>
-              {tip.isLesson && <span className="tag" style={{ background:"#FEF3C7", color:"#D97706" }}>Required</span>}
-            </div>
-            <div style={{ display:"flex", gap:8, fontSize:12 }}>
-              <span style={{ color:col, fontWeight:500 }}>{tip.category}</span>
-              <span style={{ color:"#A0A0A0" }}>{new Date(tip.createdAt).toLocaleDateString()}</span>
-            </div>
-          </div>
-          <button style={{ background:"none", border:"none", color:"#A0A0A0", fontSize:12, cursor:"pointer" }} onClick={e => { e.stopPropagation(); deleteTip(tip.id); }}>✕</button>
-        </div>
-        {active===tip.id && (
-          <div style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #F5F5F5" }}>
-            <div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7, whiteSpace:"pre-wrap" }}>{tip.body}</div>
-            {tip.videoUrl && <a href={tip.videoUrl} target="_blank" rel="noreferrer" style={{ display:"inline-flex", marginTop:8, fontSize:12, color:"#2563EB", textDecoration:"none", padding:"6px 12px", border:"1px solid #BFDBFE", borderRadius:6, background:"#EFF6FF" }}>▶ Watch reference video</a>}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div>
-      <div className="card" style={{ marginBottom:20 }}><div style={{ fontWeight:600, fontSize:18, marginBottom:6 }}>Creator lessons & key tips</div><div style={{ fontSize:13, color:"#6B6B6B" }}>Add video advice and lessons here.</div></div>
-      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:16 }}><button className="btn-primary" onClick={() => setShowAdd(!showAdd)}>+ Add tip / lesson</button></div>
-      {showAdd && (
-        <div className="card" style={{ marginBottom:16 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
-            <div><div className="field-label">Title</div><input placeholder="e.g. How to open with energy" value={form.title} onChange={e => setForm(f => ({...f,title:e.target.value}))}/></div>
-            <div><div className="field-label">Category</div><select value={form.category} onChange={e => setForm(f => ({...f,category:e.target.value}))}>{TIP_CATS.map(c => <option key={c}>{c}</option>)}</select></div>
-          </div>
-          <div style={{ marginBottom:10 }}><div className="field-label">Teaching / advice</div><textarea rows={4} placeholder="What should creators know?" value={form.body} onChange={e => setForm(f => ({...f,body:e.target.value}))} style={{ resize:"vertical" }}/></div>
-          <div style={{ marginBottom:14 }}><div className="field-label">Video reference link (optional)</div><input placeholder="https://…" value={form.videoUrl} onChange={e => setForm(f => ({...f,videoUrl:e.target.value}))}/></div>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
-            <div style={{ width:18, height:18, borderRadius:4, border:`1px solid ${form.isLesson?"#111111":"#E5E5E5"}`, background:form.isLesson?"#111111":"transparent", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }} onClick={() => setForm(f => ({...f,isLesson:!f.isLesson}))}>
-              {form.isLesson && <span style={{ fontSize:11, color:"#FFFFFF" }}>✓</span>}
-            </div>
-            <span style={{ fontSize:13, color:"#6B6B6B" }}>Mark as required lesson</span>
-          </div>
-          <div style={{ display:"flex", gap:8 }}><button className="btn-primary" onClick={handleAdd}>Save</button><button className="btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button></div>
-        </div>
-      )}
-      {tips.filter(t => t.isLesson).length > 0 && <div style={{ marginBottom:20 }}><div className="section-label" style={{ marginBottom:10, color:"#E8C547" }}>Required lessons</div><div style={{ display:"flex", flexDirection:"column", gap:8 }}>{tips.filter(t => t.isLesson).map(t => <TipCard key={t.id} tip={t}/>)}</div></div>}
-      <div className="section-label" style={{ marginBottom:10 }}>All tips {tips.length > 0 && `(${tips.length})`}</div>
-      {tips.length===0 && <div style={{ color:"#A0A0A0", fontSize:13, textAlign:"center", padding:"40px 0" }}>No tips yet.</div>}
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>{tips.filter(t => !t.isLesson).map(t => <TipCard key={t.id} tip={t}/>)}</div>
     </div>
   );
 }

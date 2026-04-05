@@ -8,7 +8,7 @@ const EMAILJS_TEMPLATE_ID = "FILL_IN_TEMPLATE_ID";
 const EMAILJS_INVOICE_TEMPLATE_ID = "FILL_IN_INVOICE_TEMPLATE_ID";
 const EMAILJS_PUBLIC_KEY = "FILL_IN_PUBLIC_KEY";
 const ADMIN_NOTIFY_EMAIL = "tanya@tilt.app";
-const GOOGLE_SCRIPT_URL = "FILL_IN_APPS_SCRIPT_URL";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxmywmIbgh1sXF4ksQPehu-aYnMd0z-uEHrFoBooo-KqKL3ucADOPZ_D-BfriITCs7odw/exec";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const DELIVERY_STYLES = ["Talking head","Green screen","Overlaid text","GRWM","Transition","Voice-over + b-roll","POV","Haul / unboxing","Day-in-the-life","Viral style"];
@@ -257,7 +257,7 @@ export default function App() {
       if (!rows || rows.length === 0) { showToast("No rows found in sheet"); setSyncing(false); return; }
 
       const existingIds = new Set(videos.map(v => v.videoId).filter(Boolean));
-      const newRows = rows.filter(r => r.videoId && r.creator && r.hook && !existingIds.has(r.videoId));
+      const newRows = rows.filter(r => r.videoId && r.creator && !existingIds.has(r.videoId));
 
       if (newRows.length === 0) { showToast("Already in sync"); setSyncing(false); return; }
 
@@ -270,14 +270,15 @@ export default function App() {
           video_id: r.videoId,
           creator_id: cr.id,
           delivery: r.delivery || "",
-          hook: r.hook,
+          hook: r.hook || "",
           script: r.script || "",
           cta: r.cta || "",
           due_date: r.dueDate || null,
           assigned_date: r.assignedDate || new Date().toISOString().split("T")[0],
-          status: "assigned",
-          video_url: "",
-          platform: "TikTok",
+          status: r.status || "assigned",
+          video_url: r.postUrl || "",
+          platform: r.platform || "TikTok",
+          posted_date: r.postedDate || null,
         });
       }
 
@@ -294,13 +295,13 @@ export default function App() {
     setSyncing(false);
   };
 
-  const updateSheetStatus = async (videoId, status) => {
+  const updateSheetStatus = async (videoId, status, postUrl) => {
     if (!videoId || GOOGLE_SCRIPT_URL === "FILL_IN_APPS_SCRIPT_URL") return;
     try {
       await fetch(GOOGLE_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({ video_id: videoId, status }),
+        body: JSON.stringify({ video_id: videoId, status, post_url: postUrl || "" }),
       });
     } catch (e) { /* silent — sheet sync is best-effort */ }
   };
@@ -310,7 +311,7 @@ export default function App() {
     await updateVideo(id, patch);
     if (patch.status) {
       const vid = videos.find(v => v.id === id);
-      if (vid?.videoId) updateSheetStatus(vid.videoId, patch.status);
+      if (vid?.videoId) updateSheetStatus(vid.videoId, patch.status, patch.videoUrl || vid.videoUrl);
     }
   };
 

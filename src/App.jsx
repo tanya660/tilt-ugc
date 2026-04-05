@@ -8,6 +8,7 @@ const EMAILJS_TEMPLATE_ID = "FILL_IN_TEMPLATE_ID";
 const EMAILJS_INVOICE_TEMPLATE_ID = "FILL_IN_INVOICE_TEMPLATE_ID";
 const EMAILJS_PUBLIC_KEY = "FILL_IN_PUBLIC_KEY";
 const ADMIN_NOTIFY_EMAIL = "tanya@tilt.app";
+const GOOGLE_SCRIPT_URL = "FILL_IN_APPS_SCRIPT_URL";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const DELIVERY_STYLES = ["Talking head","Green screen","Overlaid text","GRWM","Transition","Voice-over + b-roll","POV","Haul / unboxing","Day-in-the-life","Viral style"];
@@ -244,6 +245,75 @@ export default function App() {
     setVideos(prev => prev.map(v => videoIds.includes(v.id) ? { ...v, invoiced: true } : v));
   };
 
+  // ── Google Sheets sync ──
+  const [syncing, setSyncing] = useState(false);
+
+  const syncFromSheets = async () => {
+    if (GOOGLE_SCRIPT_URL === "FILL_IN_APPS_SCRIPT_URL") { showToast("Set GOOGLE_SCRIPT_URL first"); return; }
+    setSyncing(true);
+    try {
+      const res = await fetch(GOOGLE_SCRIPT_URL);
+      const { rows } = await res.json();
+      if (!rows || rows.length === 0) { showToast("No rows found in sheet"); setSyncing(false); return; }
+
+      const existingIds = new Set(videos.map(v => v.videoId).filter(Boolean));
+      const newRows = rows.filter(r => r.videoId && r.creator && r.hook && !existingIds.has(r.videoId));
+
+      if (newRows.length === 0) { showToast("Already in sync"); setSyncing(false); return; }
+
+      const dbRows = [];
+      for (const r of newRows) {
+        const cr = creators.find(c => c.name.toLowerCase() === r.creator.toLowerCase());
+        if (!cr) continue;
+        dbRows.push({
+          id: r.videoId + "-" + Date.now() + "-" + Math.random().toString(36).slice(2,6),
+          video_id: r.videoId,
+          creator_id: cr.id,
+          delivery: r.delivery || "",
+          hook: r.hook,
+          script: r.script || "",
+          cta: r.cta || "",
+          due_date: r.dueDate || null,
+          assigned_date: r.assignedDate || new Date().toISOString().split("T")[0],
+          status: "assigned",
+          video_url: "",
+          platform: "TikTok",
+        });
+      }
+
+      if (dbRows.length > 0) {
+        const { data: inserted } = await supabase.from("videos").insert(dbRows).select();
+        if (inserted) setVideos(prev => [...inserted.map(mapVideo), ...prev]);
+        showToast(`Synced ${dbRows.length} new video${dbRows.length !== 1 ? "s" : ""} from Sheets`);
+      } else {
+        showToast("No matching creators found for new rows");
+      }
+    } catch (err) {
+      showToast("Sync failed — check script URL");
+    }
+    setSyncing(false);
+  };
+
+  const updateSheetStatus = async (videoId, status) => {
+    if (!videoId || GOOGLE_SCRIPT_URL === "FILL_IN_APPS_SCRIPT_URL") return;
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ video_id: videoId, status }),
+      });
+    } catch (e) { /* silent — sheet sync is best-effort */ }
+  };
+
+  // Wrap updateVideo to also sync sheet
+  const updateVideoAndSheet = async (id, patch) => {
+    await updateVideo(id, patch);
+    if (patch.status) {
+      const vid = videos.find(v => v.id === id);
+      if (vid?.videoId) updateSheetStatus(vid.videoId, patch.status);
+    }
+  };
+
   // ── Derived ──
   const todayStr    = new Date().toISOString().split("T")[0];
   const todayVideos = videos.filter(v => (v.dueDate || v.date) === todayStr);
@@ -260,7 +330,7 @@ export default function App() {
 
   // ── Creator portal ──
   if (userRole === "creator" && currentCreator) {
-    return <CreatorPortal creator={currentCreator} videos={videos.filter(v => v.creatorId === currentCreator.id)} briefIdeas={briefIdeas.filter(i => i.creatorId === currentCreator.id)} bonuses={bonuses} addBriefIdea={addBriefIdea} updateVideo={updateVideo} markVideosInvoiced={markVideosInvoiced} session={session} onSignOut={signOut} showToast={showToast} toast={toast} />;
+    return <CreatorPortal creator={currentCreator} videos={videos.filter(v => v.creatorId === currentCreator.id)} briefIdeas={briefIdeas.filter(i => i.creatorId === currentCreator.id)} bonuses={bonuses} addBriefIdea={addBriefIdea} updateVideo={updateVideoAndSheet} markVideosInvoiced={markVideosInvoiced} session={session} onSignOut={signOut} showToast={showToast} toast={toast} />;
   }
 
   // ── Admin: preview mode ──
@@ -273,7 +343,7 @@ export default function App() {
             <span>Previewing as <strong>{pc.name}</strong> (read-only)</span>
             <button onClick={() => setPreviewCreator(null)} style={{ background:"#FFFFFF", color:"#111111", border:"none", borderRadius:6, padding:"4px 12px", fontSize:12, fontWeight:500, cursor:"pointer" }}>Exit preview</button>
           </div>
-          <CreatorPortal creator={pc} videos={videos.filter(v => v.creatorId === pc.id)} briefIdeas={briefIdeas.filter(i => i.creatorId === pc.id)} bonuses={bonuses} addBriefIdea={addBriefIdea} updateVideo={updateVideo} markVideosInvoiced={markVideosInvoiced} session={session} onSignOut={() => setPreviewCreator(null)} showToast={showToast} toast={toast} readOnly />
+          <CreatorPortal creator={pc} videos={videos.filter(v => v.creatorId === pc.id)} briefIdeas={briefIdeas.filter(i => i.creatorId === pc.id)} bonuses={bonuses} addBriefIdea={addBriefIdea} updateVideo={updateVideoAndSheet} markVideosInvoiced={markVideosInvoiced} session={session} onSignOut={() => setPreviewCreator(null)} showToast={showToast} toast={toast} readOnly />
         </div>
       );
     }
@@ -283,7 +353,7 @@ export default function App() {
   if (reviewing) {
     const vid = videos.find(v => v.id === reviewing);
     if (!vid) { setReviewing(null); return null; }
-    return <ReviewRoom vid={vid} creators={creators} updateVideo={updateVideo} onClose={() => setReviewing(null)} showToast={showToast} />;
+    return <ReviewRoom vid={vid} creators={creators} updateVideo={updateVideoAndSheet} onClose={() => setReviewing(null)} showToast={showToast} />;
   }
 
   // ── Admin shell ──
@@ -339,8 +409,8 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:1100, margin:"0 auto", padding:"28px 24px" }}>
-        {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefIdeas={briefIdeas} updateBriefIdea={updateBriefIdea} totalPosted={totalPosted} totalVideos={totalVideos} inProgress={inProgress} completion={completion} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing}/>}
-        {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideo} deleteVideo={deleteVideo} creators={creators} showToast={showToast} setReviewing={setReviewing}/>}
+        {view==="dashboard" && <Dashboard creators={creators} videos={videos} briefIdeas={briefIdeas} updateBriefIdea={updateBriefIdea} totalPosted={totalPosted} totalVideos={totalVideos} inProgress={inProgress} completion={completion} todayVideos={todayVideos} todayStr={todayStr} setView={setView} setReviewing={setReviewing} syncFromSheets={syncFromSheets} syncing={syncing}/>}
+        {view==="board"     && <VideoBoard videos={videos} updateVideo={updateVideoAndSheet} deleteVideo={deleteVideo} creators={creators} showToast={showToast} setReviewing={setReviewing}/>}
         {view==="creators"  && <Creators creators={creators} addCreator={addCreator} updateCreator={updateCreator} videos={videos} bonuses={bonuses} addBonus={addBonus} showToast={showToast}/>}
         {view==="invoicing" && <AdminInvoicing creators={creators} videos={videos} bonuses={bonuses} showToast={showToast}/>}
       </div>
@@ -385,7 +455,7 @@ function AccessDenied({ onSignOut }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── ADMIN: DASHBOARD ─────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function Dashboard({ creators, videos, briefIdeas, updateBriefIdea, totalPosted, totalVideos, inProgress, completion, todayVideos, todayStr, setView, setReviewing }) {
+function Dashboard({ creators, videos, briefIdeas, updateBriefIdea, totalPosted, totalVideos, inProgress, completion, todayVideos, todayStr, setView, setReviewing, syncFromSheets, syncing }) {
   const [timeView, setTimeView] = useState("total");
   const pendingReview  = todayVideos.filter(v => v.status === "first draft" || v.status === "second draft");
   const todayPosted    = todayVideos.filter(v => v.status === "posted").length;
@@ -411,10 +481,13 @@ function Dashboard({ creators, videos, briefIdeas, updateBriefIdea, totalPosted,
           <h1 style={{ fontWeight:600, fontSize:22 }}>Good {new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}</h1>
           <p style={{ color:"#6B6B6B", fontSize:13, marginTop:4 }}>Here's your content pipeline overview.</p>
         </div>
-        <div style={{ display:"flex", gap:0, border:"1px solid #E5E5E5", borderRadius:8, overflow:"hidden" }}>
-          {[["total","All time"],["today","Today"]].map(([v,l]) => (
-            <button key={v} onClick={() => setTimeView(v)} style={{ background:timeView===v?"#111111":"#FFFFFF", color:timeView===v?"#FFFFFF":"#6B6B6B", border:"none", padding:"6px 16px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", fontWeight:timeView===v?500:400 }}>{l}</button>
-          ))}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <button onClick={syncFromSheets} disabled={syncing} style={{ background:"#FFFFFF", border:"1px solid #E5E5E5", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", color:syncing?"#A0A0A0":"#111111", fontWeight:500, transition:"all 0.15s" }}>{syncing ? "Syncing…" : "Sync from Sheets"}</button>
+          <div style={{ display:"flex", gap:0, border:"1px solid #E5E5E5", borderRadius:8, overflow:"hidden" }}>
+            {[["total","All time"],["today","Today"]].map(([v,l]) => (
+              <button key={v} onClick={() => setTimeView(v)} style={{ background:timeView===v?"#111111":"#FFFFFF", color:timeView===v?"#FFFFFF":"#6B6B6B", border:"none", padding:"6px 16px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", fontWeight:timeView===v?500:400 }}>{l}</button>
+            ))}
+          </div>
         </div>
       </div>
 

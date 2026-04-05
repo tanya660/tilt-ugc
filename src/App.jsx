@@ -483,7 +483,7 @@ function Dashboard({ creators, videos, briefIdeas, updateBriefIdea, totalPosted,
           <p style={{ color:"#6B6B6B", fontSize:13, marginTop:4 }}>Here's your content pipeline overview.</p>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button onClick={syncFromSheets} disabled={syncing} style={{ background:"#FFFFFF", border:"1px solid #E5E5E5", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", color:syncing?"#A0A0A0":"#111111", fontWeight:500, transition:"all 0.15s" }}>{syncing ? "Syncing…" : "Sync from Sheets"}</button>
+          <button onClick={syncFromSheets} disabled={syncing} style={{ background:"#FFFFFF", border:"1px solid #E5E5E5", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", color:syncing?"#A0A0A0":"#111111", fontWeight:500, transition:"all 0.15s" }}>{syncing ? "Syncing…" : "Sync"}</button>
           <div style={{ display:"flex", gap:0, border:"1px solid #E5E5E5", borderRadius:8, overflow:"hidden" }}>
             {[["total","All time"],["today","Today"]].map(([v,l]) => (
               <button key={v} onClick={() => setTimeView(v)} style={{ background:timeView===v?"#111111":"#FFFFFF", color:timeView===v?"#FFFFFF":"#6B6B6B", border:"none", padding:"6px 16px", fontSize:12, fontFamily:"'Inter',sans-serif", cursor:"pointer", fontWeight:timeView===v?500:400 }}>{l}</button>

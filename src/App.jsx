@@ -1395,11 +1395,12 @@ function CreatorVideos({ creator, videos, updateVideo, showToast, readOnly }) {
 
   const VideoCard = ({ vid, actions }) => {
     const expanded = expandedId === vid.id;
+    const cardTitle = [vid.videoId, vid.hook].filter(Boolean).join(": ");
     return (
       <div className="card" style={{ padding:12 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4, cursor:"pointer" }} onClick={() => setExpandedId(expanded ? null : vid.id)}>
-          <span style={{ fontWeight:600, fontSize:14 }}>{vid.videoId || "—"}</span>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontWeight:600, fontSize:14, flex:1, marginRight:8 }}>{cardTitle || "—"}</span>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
             <StatusBadge status={vid.status} />
             <span style={{ fontSize:16, color:"#A0A0A0", transform:expanded?"rotate(180deg)":"rotate(0)", transition:"transform 0.15s", display:"inline-block" }}>▾</span>
           </div>
@@ -1408,10 +1409,14 @@ function CreatorVideos({ creator, videos, updateVideo, showToast, readOnly }) {
         {expanded && (
           <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #F5F5F5" }}>
             {vid.delivery && <div style={{ marginBottom:8 }}><span className="tag" style={{ background:"#EFF6FF", color:"#2563EB" }}>{vid.delivery}</span></div>}
+            {vid.platform && <div style={{ marginBottom:8 }}><span className="tag">{vid.platform}</span></div>}
             <div style={{ fontSize:11, fontWeight:500, color:"#A0A0A0", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:4 }}>Hook</div>
             <div style={{ fontSize:15, fontWeight:600, color:"#111111", lineHeight:1.5, marginBottom:12 }}>{vid.hook}</div>
             {vid.script && <><div style={{ fontSize:11, fontWeight:500, color:"#A0A0A0", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:4 }}>Script</div><div style={{ fontSize:13, color:"#6B6B6B", lineHeight:1.7, whiteSpace:"pre-wrap", marginBottom:12 }}>{vid.script}</div></>}
             {vid.cta && <><div style={{ fontSize:11, fontWeight:500, color:"#A0A0A0", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:4 }}>CTA</div><div style={{ fontSize:13, color:"#111111", marginBottom:12 }}>{vid.cta}</div></>}
+            {(vid.dueDate || vid.date) && <div style={{ fontSize:12, color:"#6B6B6B", marginBottom:4 }}>Due: {formatDateShort(vid.dueDate || vid.date)}</div>}
+            {vid.assignedDate && <div style={{ fontSize:12, color:"#6B6B6B", marginBottom:4 }}>Assigned: {formatDateShort(vid.assignedDate)}</div>}
+            {vid.videoUrl && <a href={vid.videoUrl} target="_blank" rel="noreferrer" style={{ display:"inline-block", fontSize:13, color:"#2563EB", textDecoration:"none", fontWeight:500, marginTop:4 }}>View on TikTok →</a>}
           </div>
         )}
         {actions && !readOnly && <div style={{ marginTop:8 }}>{actions}</div>}
@@ -1447,16 +1452,7 @@ function CreatorVideos({ creator, videos, updateVideo, showToast, readOnly }) {
 
       <Section id="posted" label="Posted" count={posted.length} countColor="#16A34A">
         {posted.length === 0 && <div style={{ fontSize:13, color:"#A0A0A0", textAlign:"center", padding:12 }}>No posted videos yet</div>}
-        {posted.map(vid => (
-          <div key={vid.id} className="card" style={{ padding:12 }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
-              <span style={{ fontWeight:600, fontSize:14 }}>{vid.videoId || "—"}</span>
-              <StatusBadge status="posted" />
-            </div>
-            <div style={{ fontSize:12, color:"#6B6B6B", marginBottom:4 }}>{vid.hook?.slice(0,60)}</div>
-            {vid.videoUrl && <a href={vid.videoUrl} target="_blank" rel="noreferrer" style={{ fontSize:13, color:"#2563EB", textDecoration:"none", fontWeight:500 }}>View on TikTok →</a>}
-          </div>
-        ))}
+        {posted.map(vid => <VideoCard key={vid.id} vid={vid} />)}
       </Section>
 
       {linkModal && (
